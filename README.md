@@ -109,6 +109,46 @@ python scripts/benchmark_plans.py
 
 This is **not yet** an A/B test of LLM agents: it makes zero LLM calls and does not use MCP transport. See [planned execution design, API and benchmark limits](docs/PLANNED_EXECUTION.md).
 
+## Integrated planner → MCP execution (experimental)
+
+This repository now includes a **real MCP stdio client** that launches the sibling `mcp-tool-platform` server, discovers its enabled tools, and invokes them through the MCP protocol. A bounded DAG executor handles dependencies and up to four concurrent calls per wave. An optional OpenAI-compatible LLM generates JSON plans, which are validated before execution.
+
+**Prerequisites:** Both repositories must be checked out on the same machine, and the MCP server package must be installed in the Python environment used to launch it.
+
+```bash
+# In the multi-agent-orchestration checkout
+python -m pip install -e '.[dev,mcp]'
+# In the sibling MCP checkout (same virtual environment)
+python -m pip install -e '../mcp-tool-platform[mcp]'
+export MCP_TOOL_PROJECT_DIR="$(cd ../mcp-tool-platform && pwd)"
+export MCP_ALLOWED_SCOPES=text:read,text:hash
+uvicorn agent_workflows.api:app --host 127.0.0.1 --port 8000
+```
+
+Test the real MCP transport without a paid LLM:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/v1/mcp-plans/run \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"Count these words","planner":"offline"}'
+```
+
+The `offline` planner is intentionally simple: it constructs a single `word_count` step from the supplied question. It does not infer complex workflows.
+
+For an optional LLM-generated plan, set these **server-side** environment variables before launching the API:
+
+```bash
+export PLANNER_API_URL=https://api.openai.com/v1
+export PLANNER_API_KEY=your-api-key
+export PLANNER_MODEL=your-json-compatible-model
+```
+
+Then send `{"question":"Count the words and hash this text: hello world","planner":"llm"}` to the same endpoint. The model must support chat completions and JSON-object responses. Model-generated plans are restricted to `word_count` and `sha256_text`, with bounded arguments and dependencies. Do not expose this unauthenticated local API to the internet.
+
+**Current limits:** No durable checkpoints, retries, token-cost accounting, hybrid replan loop, public authentication or real-world side-effecting tools. The MCP bridge starts a local process per request. Its tool scopes are server-configured, not client-provided. The existing deterministic LangGraph and local DAG endpoints remain separate.
+
+See [planned execution design](docs/PLANNED_EXECUTION.md).
+
 ## Tests and operational commands
 
 ```bash
