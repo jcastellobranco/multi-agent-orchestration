@@ -60,3 +60,32 @@ def test_mcp_server_config_default_deny(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_ALLOWED_SCOPES", "admin")
     with pytest.raises(RuntimeError):
         server_config()
+
+
+def test_integrated_api_uses_server_bound_mcp(monkeypatch):
+    from fastapi.testclient import TestClient
+    from agent_workflows import api
+
+    async def fake_run(steps, *, parallel=True):
+        assert steps[0]["tool"] == "word_count"
+        return {"engine": "mcp-planned", "status": "completed", "results": {"count": {"words": 2}}, "llm_calls": 0}
+
+    monkeypatch.setattr(api, "run_mcp_plan", fake_run)
+    response = TestClient(api.app).post("/v1/mcp-plans/run", json={"question": "hello world", "planner": "offline"})
+    assert response.status_code == 200
+    assert response.json()["planner"] == "offline"
+    assert response.json()["llm_calls"] == 0
+    assert TestClient(api.app).post("/v1/mcp-plans/run", json={"question": "hi", "planner": "unknown"}).status_code == 422
+
+
+def test_integrated_api_never_exposes_upstream_errors(monkeypatch):
+    from fastapi.testclient import TestClient
+    from agent_workflows import api
+
+    async def fake_run(steps, *, parallel=True):
+        raise RuntimeError("private tool secret")
+
+    monkeypatch.setattr(api, "run_mcp_plan", fake_run)
+    response = TestClient(api.app).post("/v1/mcp-plans/run", json={"question": "hello"})
+    assert response.status_code == 502
+    assert "secret" not in response.text
