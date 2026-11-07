@@ -1,0 +1,12 @@
+services:
+  agent-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent-demo
+    ports:
+      - "127.0.0.1:8090:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
