@@ -54,12 +54,14 @@ def test_parallel_ready_steps():
     assert seq["duration_ms"] > par["duration_ms"]
 
 
-def test_http_demo_contract_and_policy():
+def test_http_demo_contract_and_policy(monkeypatch):
+    monkeypatch.setenv("DEMO_TOOL_SCOPES", "text:read,text:hash")
     client = TestClient(app)
-    response = client.post("/v1/plans/run", json={"steps": plan(), "scopes": ["text:read", "text:hash"]})
+    response = client.post("/v1/plans/run", json={"steps": plan()})
     assert response.status_code == 200
     assert response.json()["results"]["a"]["words"] == 2
-    denied = client.post("/v1/plans/run", json={"steps": plan(), "scopes": ["text:read"]})
+    monkeypatch.setenv("DEMO_TOOL_SCOPES", "text:read")
+    denied = client.post("/v1/plans/run", json={"steps": plan()})
     assert denied.status_code == 403
     invalid = client.post("/v1/plans/run", json={"steps": [{"id": "x", "tool": "shell", "args": {}}]})
     assert invalid.status_code == 422
