@@ -80,3 +80,39 @@ def execute_demo_plan(request: PlanRequest):
         raise HTTPException(422, "Invalid execution plan")
     except ExecutionError:
         raise HTTPException(502, "Tool execution failed")
+
+
+# Experimental local-only LLM planner -> MCP stdio -> bounded DAG execution.
+import asyncio
+from .llm_planner import deterministic_plan, llm_plan
+from .mcp_bridge import run_mcp_plan
+
+
+class MCPPlanRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    planner: str = Field(default="offline", pattern="^(offline|llm)$")
+    parallel: bool = True
+
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/v1/mcp-plans/run")
+def execute_mcp_plan(request: MCPPlanRequest):
+    """Local-only synchronous integration. No public auth or durable jobs."""
+    try:
+        steps = (llm_plan(request.question) if request.planner == "llm"
+                 else deterministic_plan(request.question))
+        result = asyncio.run(run_mcp_plan(steps, parallel=request.parallel))
+        result["planner"] = request.planner
+        result["llm_calls"] = 1 if request.planner == "llm" else 0
+        return result
+    except (PlanError, ValueError):
+        raise HTTPException(422, "Invalid execution plan")
+    except PermissionError:
+        raise HTTPException(403, "Tool execution not authorized")
+    except RuntimeError as exc:
+        if "not configured" in str(exc) or "path is invalid" in str(exc) or "Invalid MCP scopes" in str(exc):
+            raise HTTPException(503, "MCP or planner is not configured")
+        raise HTTPException(502, "MCP plan execution failed")
+    except Exception:
+        raise HTTPException(502, "MCP plan execution failed")
