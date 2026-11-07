@@ -80,6 +80,35 @@ curl -sS -X POST http://127.0.0.1:8090/v1/graphs/run \
 
 Expected result includes `engine: langgraph`, source-backed findings, status and trace. This endpoint fails with 503 if the RAG configuration is missing and 502 if upstream retrieval fails. The RAG adapter requires an exact tenant UUID configured server-side.
 
+## Planned execution prototype (new)
+
+A separate **declarative DAG executor** is available at `POST /v1/plans/run`. It validates a bounded plan, executes independent steps concurrently, checks server-side scopes, and reports per-step timings. It currently uses **two local deterministic demo tools**, not a live MCP connection or LLM-generated plan.
+
+For local Python development:
+
+```bash
+export DEMO_TOOL_SCOPES=text:read,text:hash
+uvicorn agent_workflows.api:app --host 127.0.0.1 --port 8000
+```
+
+Then:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/v1/plans/run \
+  -H 'Content-Type: application/json' \
+  -d '{"steps":[{"id":"count","tool":"text.word_count","args":{"text":"hello world"}},{"id":"hash","tool":"text.sha256","args":{"text":"hello world"}}]}'
+```
+
+The server denies all tools unless `DEMO_TOOL_SCOPES` is configured; callers **cannot** supply permissions. For Docker, pass that variable to the agent service in a local Compose override.
+
+An offline microbenchmark compares sequential vs parallel independent I/O waits:
+
+```bash
+python scripts/benchmark_plans.py
+```
+
+This is **not yet** an A/B test of LLM agents: it makes zero LLM calls and does not use MCP transport. See [planned execution design, API and benchmark limits](docs/PLANNED_EXECUTION.md).
+
 ## Tests and operational commands
 
 ```bash
