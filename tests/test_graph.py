@@ -1,5 +1,7 @@
 import httpx
 import pytest
+from fastapi.testclient import TestClient
+from agent_workflows.api import app
 from agent_workflows.graph import run_graph
 from agent_workflows.atlas import atlas_search, AtlasConfigurationError
 
@@ -41,3 +43,21 @@ def test_atlas_adapter_rejects_untrusted_plain_http(monkeypatch):
     monkeypatch.setenv("ATLAS_RAG_URL", "http://example.com")
     with pytest.raises(AtlasConfigurationError):
         atlas_search("Question?")
+
+
+def test_graph_api_contract(monkeypatch):
+    from agent_workflows import api
+    monkeypatch.setattr(api, "run_graph", lambda question: {"status": "reviewed", "question": question})
+    client = TestClient(app)
+    assert client.post("/v1/graphs/run", json={"question": "Explain RAG"}).json()["status"] == "reviewed"
+    assert client.post("/v1/graphs/run", json={"question": ""}).status_code == 422
+
+
+def test_graph_api_does_not_expose_provider_exception(monkeypatch):
+    from agent_workflows import api
+    def fail(question):
+        raise RuntimeError("secret provider error")
+    monkeypatch.setattr(api, "run_graph", fail)
+    response = TestClient(app).post("/v1/graphs/run", json={"question": "Explain RAG"})
+    assert response.status_code == 502
+    assert "secret" not in response.text
