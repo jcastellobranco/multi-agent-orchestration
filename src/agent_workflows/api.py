@@ -116,3 +116,6 @@ def execute_mcp_plan(request: MCPPlanRequest):
         raise HTTPException(502, "MCP plan execution failed")
     except Exception:
         raise HTTPException(502, "MCP plan execution failed")
+
+from .internal_api import router as internal_router
+app.include_router(internal_router)
