@@ -1,5 +1,7 @@
 """Local development API; no authentication: never expose publicly."""
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from .workflow import run_workflow
 from .graph import run_graph
@@ -7,6 +9,18 @@ from .atlas import AtlasConfigurationError
 from fastapi import HTTPException
 
 app = FastAPI(title="Multi-Agent Orchestration (local demo)")
+
+# Fail closed: public demo endpoints require explicit local-development opt-in.
+DEMO_PATHS = frozenset({
+    "/v1/workflows/run", "/v1/graphs/run", "/v1/plans/run", "/v1/mcp-plans/run"
+})
+
+@app.middleware("http")
+async def restrict_demo_routes(request: Request, call_next):
+    if request.url.path in DEMO_PATHS and os.getenv("ATLAS_ENABLE_DEMO_ENDPOINTS", "").lower() != "true":
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    return await call_next(request)
+
 
 
 class Evidence(BaseModel):
