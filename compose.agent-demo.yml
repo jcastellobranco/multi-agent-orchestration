@@ -6,6 +6,7 @@ services:
     ports:
       - "127.0.0.1:8090:8000"
     environment:
+      ATLAS_ENABLE_DEMO_ENDPOINTS: "true"
       ATLAS_RAG_URL: ${ATLAS_RAG_URL:-}
       ATLAS_RAG_API_KEY: ${ATLAS_RAG_API_KEY:-}
       ATLAS_TENANT_ID: ${ATLAS_TENANT_ID:-}
