@@ -11,6 +11,7 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.29,<1", "langgraph>=0.2,<2", "h
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "httpx>=0.27,<1"]
 mcp = ["mcp>=1,<2"]
+redis = ["redis>=5,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

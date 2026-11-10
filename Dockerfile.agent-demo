@@ -2,13 +2,13 @@ FROM python:3.11-slim AS builder
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY src/ src/
-RUN pip wheel --no-cache-dir --wheel-dir /wheels '.[mcp]'
+RUN pip wheel --no-cache-dir --wheel-dir /wheels '.[mcp,redis]'
 
 FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels 'multi-agent-orchestration[mcp]' \
+RUN pip install --no-cache-dir --no-index --find-links=/wheels 'multi-agent-orchestration[mcp,redis]' \
     && rm -rf /wheels
 USER 65534:65534
 EXPOSE 8000
