@@ -37,7 +37,9 @@ async def open_mcp():
     from mcp.client.stdio import stdio_client
 
     root, python, scopes = server_config()
-    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
+    # Keep service credentials and provider tokens out of child processes.
+    safe_env_keys = ("PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR", "TMPDIR", "TEMP", "TMP")
+    env = {key: os.environ[key] for key in safe_env_keys if key in os.environ}
     env["PYTHONPATH"] = str(Path(root) / "src")
     env["MCP_ALLOWED_SCOPES"] = ",".join(sorted(scopes))
     params = StdioServerParameters(
