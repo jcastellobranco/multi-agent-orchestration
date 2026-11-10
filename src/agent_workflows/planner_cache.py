@@ -12,6 +12,20 @@ import time
 import json
 from collections import OrderedDict
 
+def _redis_connection():
+    import redis
+    host = os.getenv("ATLAS_REDIS_HOST", "")
+    secret_file = os.getenv("ATLAS_REDIS_PASSWORD_FILE", "")
+    if host and secret_file:
+        with open(secret_file, encoding="utf-8") as handle:
+            password = handle.read().strip()
+        if len(password) < 32:
+            raise ValueError("Redis secret must be at least 32 characters")
+        return redis.Redis(host=host, port=6379, db=0, password=password,
+                           socket_connect_timeout=1, socket_timeout=1)
+    url = os.getenv("ATLAS_REDIS_URL", "")
+    return redis.Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1)
+
 _LOCK = threading.Lock()
 _ENTRIES = OrderedDict()
 _MAX_ITEMS = 128
@@ -30,13 +44,13 @@ def get(tenant: str, prompt: str, model: str, policy: str):
     if not _enabled():
         return None
     key = _key(tenant, prompt, model, policy)
-    redis_url = os.getenv("ATLAS_REDIS_URL", "")
+    redis_url = os.getenv("ATLAS_REDIS_URL", "") or os.getenv("ATLAS_REDIS_HOST", "")
     if redis_url:
         import redis
         try:
-            value = redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).get("atlas:planner:" + key)
+            value = _redis_connection().get("atlas:planner:" + key)
             return json.loads(value) if value is not None else None
-        except redis.RedisError:
+        except (redis.RedisError, OSError, ValueError):
             # Never fall back to an unscoped shared cache on Redis errors.
             return None
     with _LOCK:
