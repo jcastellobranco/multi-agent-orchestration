@@ -9,6 +9,7 @@ import hmac
 import os
 import threading
 import time
+import json
 from collections import OrderedDict
 
 _LOCK = threading.Lock()
@@ -29,6 +30,15 @@ def get(tenant: str, prompt: str, model: str, policy: str):
     if not _enabled():
         return None
     key = _key(tenant, prompt, model, policy)
+    redis_url = os.getenv("ATLAS_REDIS_URL", "")
+    if redis_url:
+        import redis
+        try:
+            value = redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).get("atlas:planner:" + key)
+            return json.loads(value) if value is not None else None
+        except redis.RedisError:
+            # Never fall back to an unscoped shared cache on Redis errors.
+            return None
     with _LOCK:
         entry = _ENTRIES.get(key)
         if entry is None:
@@ -47,6 +57,15 @@ def put(tenant: str, prompt: str, model: str, policy: str, value):
     ttl = int(os.getenv("ATLAS_PLANNER_CACHE_TTL_SECONDS", "120"))
     if not 1 <= ttl <= 3600:
         raise ValueError("Cache TTL must be 1..3600 seconds")
+    redis_url = os.getenv("ATLAS_REDIS_URL", "")
+    if redis_url:
+        import redis
+        try:
+            redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).setex(
+                "atlas:planner:" + key, ttl, json.dumps(value))
+        except redis.RedisError:
+            pass  # Cache is optional; never fail the actual planner.
+        return
     with _LOCK:
         _ENTRIES[key] = (time.monotonic() + ttl, copy.deepcopy(value))
         _ENTRIES.move_to_end(key)
