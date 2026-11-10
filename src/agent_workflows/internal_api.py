@@ -11,6 +11,7 @@ from .mcp_bridge import run_mcp_plan
 from .graph import run_graph
 from .guardrails import validate_input, validate_execution, GuardrailViolation
 from . import planner_cache
+from .telemetry_client import emit
 from time import perf_counter
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
@@ -48,13 +49,15 @@ async def execute_internal(body: InternalRun, x_atlas_service_key: str | None = 
             # Keep MCP execution and its independent scope enforcement in the flow.
             steps = deterministic_plan(question)
             mcp = await run_mcp_plan(steps)
-            return validate_execution({
+            response = validate_execution({
                 **mcp, "workflow": "research", "planner": "offline",
                 "llm_calls": 0, "research": graph,
                 "status": "completed" if graph["approved"] else "insufficient_evidence",
                 "duration_ms": round(graph["duration_ms"] + mcp["duration_ms"], 2),
                 "cache_hit": False,
             })
+            await emit(tenant, body.workflow, response)
+            return response
         if body.planner == "llm":
             model = os.getenv("PLANNER_MODEL", "")
             steps = planner_cache.get(tenant, question, model, "v1")
@@ -69,10 +72,13 @@ async def execute_internal(body: InternalRun, x_atlas_service_key: str | None = 
         result["llm_calls"] = 1 if body.planner == "llm" and not cache_hit else 0
         result["cache_hit"] = cache_hit
         result["end_to_end_ms"] = round((perf_counter() - started) * 1000, 2)
-        return validate_execution(result)
+        response = validate_execution(result)
+        await emit(tenant, body.workflow, response)
+        return response
     except HTTPException:
         raise
     except GuardrailViolation:
+        await emit(tenant, body.workflow, {"status": "blocked"}, blocked=True)
         raise HTTPException(422, "Agent guardrail rejected request")
     except Exception:
         # Never leak tool output, upstream credentials or model exceptions.
