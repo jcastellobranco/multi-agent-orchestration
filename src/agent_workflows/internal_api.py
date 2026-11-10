@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 from .llm_planner import deterministic_plan, llm_plan
 from .mcp_bridge import run_mcp_plan
 from .graph import run_graph
+from .guardrails import validate_input, validate_execution, GuardrailViolation
+from . import planner_cache
+from time import perf_counter
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
@@ -33,28 +36,36 @@ async def execute_internal(body: InternalRun, x_atlas_service_key: str | None = 
     if body.tenant_id != tenant:
         raise HTTPException(403, "Tenant not supported by this agent deployment")
     try:
+        question = validate_input(body.question)
+        started = perf_counter()
+        cache_hit = False
         if body.workflow == "research":
             if body.planner != "offline":
                 raise HTTPException(422, "Research workflow currently requires offline planning")
             # LangGraph uses the existing server-bound, tenant-scoped RAG adapter.
             # Run its synchronous HTTP retrieval outside the event loop.
-            graph = await asyncio.to_thread(run_graph, body.question)
+            graph = await asyncio.to_thread(run_graph, question)
             # Keep MCP execution and its independent scope enforcement in the flow.
-            steps = deterministic_plan(body.question)
+            steps = deterministic_plan(question)
             mcp = await run_mcp_plan(steps)
-            return {
+            return validate_execution({
                 **mcp, "workflow": "research", "planner": "offline",
                 "llm_calls": 0, "research": graph,
                 "status": "completed" if graph["approved"] else "insufficient_evidence",
                 "duration_ms": round(graph["duration_ms"] + mcp["duration_ms"], 2),
-            }
+                "cache_hit": False,
+            })
         steps = llm_plan(body.question) if body.planner == "llm" else deterministic_plan(body.question)
         result = await run_mcp_plan(steps)
         result["planner"] = body.planner
-        result["llm_calls"] = 1 if body.planner == "llm" else 0
-        return result
+        result["llm_calls"] = 1 if body.planner == "llm" and not cache_hit else 0
+        result["cache_hit"] = cache_hit
+        result["end_to_end_ms"] = round((perf_counter() - started) * 1000, 2)
+        return validate_execution(result)
     except HTTPException:
         raise
+    except GuardrailViolation:
+        raise HTTPException(422, "Agent guardrail rejected request")
     except Exception:
         # Never leak tool output, upstream credentials or model exceptions.
         raise HTTPException(502, "Agent execution failed")
