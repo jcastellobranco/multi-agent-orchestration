@@ -55,7 +55,15 @@ async def execute_internal(body: InternalRun, x_atlas_service_key: str | None = 
                 "duration_ms": round(graph["duration_ms"] + mcp["duration_ms"], 2),
                 "cache_hit": False,
             })
-        steps = llm_plan(body.question) if body.planner == "llm" else deterministic_plan(body.question)
+        if body.planner == "llm":
+            model = os.getenv("PLANNER_MODEL", "")
+            steps = planner_cache.get(tenant, question, model, "v1")
+            cache_hit = steps is not None
+            if steps is None:
+                steps = await asyncio.to_thread(llm_plan, question)
+                planner_cache.put(tenant, question, model, "v1", steps)
+        else:
+            steps = deterministic_plan(question)
         result = await run_mcp_plan(steps)
         result["planner"] = body.planner
         result["llm_calls"] = 1 if body.planner == "llm" and not cache_hit else 0
